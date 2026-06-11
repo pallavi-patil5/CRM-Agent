@@ -3,57 +3,49 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import numpy as np
+import chromadb
 from sentence_transformers import SentenceTransformer
 from database.db import SessionLocal
 from database.models import KnowledgeChunk
 
-
+CHROMA_PATH = Path(__file__).resolve().parent.parent.parent / "chroma_db"
 TOP_K = 5
-MODEL_NAME = "all-MiniLM-L6-v2"
 
-model = SentenceTransformer(MODEL_NAME)
-
-
-def generate_embedding(query):
-    return model.encode(query).tolist()
-
-
-def cosine_distance(a, b):
-    a, b = np.array(a), np.array(b)
-    norm = np.linalg.norm(a) * np.linalg.norm(b)
-    if norm == 0:
-        return 1.0
-    return 1.0 - float(np.dot(a, b) / norm)
+model = SentenceTransformer("all-MiniLM-L6-v2")
+chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+chroma_collection = chroma_client.get_or_create_collection("knowledge_base")
 
 
 def search_knowledge_base(query: str, top_k: int = TOP_K):
-    query_embedding = generate_embedding(query)
+    query_embedding = model.encode(query).tolist()
+    results = chroma_collection.query(query_embeddings=[query_embedding], n_results=top_k)
 
+    ids = results["ids"][0]
+    distances = results["distances"][0]
+
+    # Parse source_doc and chunk_index from ChromaDB IDs to fetch from PostgreSQL
+    output = []
     db = SessionLocal()
     try:
-        chunks = db.query(KnowledgeChunk).all()
+        for chroma_id, distance in zip(ids, distances):
+            # chroma_id format: "filename.md_idx"
+            last_underscore = chroma_id.rfind("_")
+            source_doc = chroma_id[:last_underscore]
+            chunk_index = int(chroma_id[last_underscore + 1:])
+            chunk = db.query(KnowledgeChunk).filter_by(
+                source_doc=source_doc, chunk_index=chunk_index
+            ).first()
+            if chunk:
+                output.append({
+                    "id": chunk.id,
+                    "source_doc": chunk.source_doc,
+                    "chunk_text": chunk.chunk_text,
+                    "distance": distance
+                })
     finally:
         db.close()
 
-    if not chunks:
-        return []
-
-    scored = []
-    for chunk in chunks:
-        if chunk.embedding is None:
-            continue
-        emb = chunk.embedding if isinstance(chunk.embedding, list) else list(chunk.embedding)
-        distance = cosine_distance(query_embedding, emb)
-        scored.append({
-            "id": chunk.id,
-            "source_doc": chunk.source_doc,
-            "chunk_text": chunk.chunk_text,
-            "distance": distance
-        })
-
-    scored.sort(key=lambda x: x["distance"])
-    return scored[:top_k]
+    return output
 
 
 if __name__ == "__main__":

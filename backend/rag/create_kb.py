@@ -3,10 +3,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import chromadb
 from sentence_transformers import SentenceTransformer
 
 from database.db import SessionLocal
 from database.models import KnowledgeChunk
+
+CHROMA_PATH = Path(__file__).resolve().parent.parent.parent / "chroma_db"
+chroma_client = chromadb.PersistentClient(path=str(CHROMA_PATH))
+chroma_collection = chroma_client.get_or_create_collection("knowledge_base")
 
 
 # =====================================
@@ -53,22 +58,25 @@ def process_file(filepath):
 
     chunks = chunk_text(content)
 
-    for idx, chunk in enumerate(chunks):
+    embeddings = model.encode(chunks).tolist()
 
-        embedding = model.encode(
-            chunk
-        ).tolist()
+    for idx, chunk in enumerate(chunks):
 
         kb_chunk = KnowledgeChunk(
             source_doc=filepath.name,
             chunk_index=idx,
             chunk_text=chunk,
-            embedding=embedding
+            embedding=embeddings[idx]
         )
 
         db.add(kb_chunk)
 
     db.commit()
+
+    # Also upsert into ChromaDB
+    ids = [f"{filepath.name}_{idx}" for idx in range(len(chunks))]
+    metadatas = [{"source_doc": filepath.name, "chunk_index": idx} for idx in range(len(chunks))]
+    chroma_collection.upsert(ids=ids, embeddings=embeddings, documents=chunks, metadatas=metadatas)
 
     print(
         f"Stored {len(chunks)} chunks "
