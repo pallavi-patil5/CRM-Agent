@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from database.db import SessionLocal
 
@@ -17,6 +18,7 @@ from api.ingest_email import router as ingest_router
 from api.dashboard import router as dashboard_router
 from api.analytics import router as analytics_router
 from api.rag_api import router as rag_router
+from api.gmail_api import router as gmail_router
 
 app = FastAPI(
     title="Agentic Email CRM",
@@ -24,10 +26,18 @@ app = FastAPI(
     description="Production-grade AI-powered CRM with autonomous triage agent"
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(ingest_router)
 app.include_router(dashboard_router)
 app.include_router(analytics_router)
 app.include_router(rag_router)
+app.include_router(gmail_router)
 
 agent = TriageAgent()
 

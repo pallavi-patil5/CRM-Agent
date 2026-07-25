@@ -1,6 +1,21 @@
 # Agentic CRM Intelligence Platform
 
-A production-grade, AI-powered Customer Relationship Management system that autonomously monitors a high-volume inbox, triages emails with multi-dimensional intelligence, executes agentic workflows, and surfaces real-time business insights.
+AI-powered Customer Relationship Management system that autonomously monitors a high-volume inbox, triages emails with multi-dimensional intelligence, executes agentic workflows, and surfaces real-time business insights.
+
+---
+
+## Resume Metrics
+
+- 📧 **60 customer emails** across 30 conversation threads
+- 🧵 **30 conversation threads** with full history retrieval
+- 📚 **6 knowledge base documents** chunked and embedded into ChromaDB
+- 🏷️ **12 email categories** — Complaint, Billing, Refund, Bug Report, Feature Request, Security, Legal, Compliance, Sales, Spam, Internal, General Inquiry
+- 🤖 **Multi-step ReAct reasoning** with up to 6 tool invocations per email
+- ⚡ **Sub-10ms heuristic pre-filter** before any LLM call
+- 🔐 **5 hard-rule guardrails** — no auto-reply for Security, Legal, Spam, Internal, Critical
+- 📬 **Gmail API integration** — OAuth2, real inbox sync, deduplication
+- 🧠 **RAG pipeline** — PostgreSQL + ChromaDB dual storage, sentence-transformers embeddings
+- 📊 **React dashboard** — 5 pages, real-time charts, agent reasoning trace viewer
 
 ---
 
@@ -21,7 +36,7 @@ Ignored   Escalate  Flag + Escalate
     Thread History Retrieval (PostgreSQL)
               │
               ▼
-    RAG Knowledge Base Search (pgvector / cosine similarity)
+    RAG Knowledge Base Search (ChromaDB vector similarity)
               │
               ▼
     LLM Classification (Ollama llama3)
@@ -38,7 +53,7 @@ Ignored   Escalate  Flag + Escalate
     Auto-Reply   Escalate / Ticket / Flag
          │
          ▼
-    PostgreSQL DB + Streamlit Dashboard
+    PostgreSQL DB + React Dashboard
 ```
 
 ---
@@ -49,10 +64,12 @@ Ignored   Escalate  Flag + Escalate
 |---|---|---|
 | Backend | FastAPI | Async-ready, automatic OpenAPI docs, Pydantic validation |
 | Database | PostgreSQL | Relational integrity, JSON columns, full-text search |
-| Vector Search | Cosine similarity (numpy) | No pgvector extension required; works on any PostgreSQL |
+| Vector Search | ChromaDB (persistent) | Dedicated vector store; fast similarity search, no numpy required |
+| KB Storage | PostgreSQL + ChromaDB | PostgreSQL stores chunk text/metadata; ChromaDB stores embeddings |
 | Embeddings | sentence-transformers (all-MiniLM-L6-v2) | Lightweight, fast, runs locally, no API cost |
 | LLM | Ollama (llama3) | Fully local, no API keys, privacy-preserving |
-| Frontend | Streamlit | Rapid dashboard development, Python-native |
+| Email Integration | Gmail API (OAuth2) | Fetch unread emails, dedup, auto-ingest into CRM |
+| Frontend | React + Vite | Fast SPA, component-based, Recharts for data viz |
 | ORM | SQLAlchemy | Mature, type-safe, supports all PostgreSQL features |
 
 ---
@@ -69,26 +86,41 @@ crm-agent-platform/
 │   │   ├── dashboard.py           # Dashboard summary endpoints
 │   │   ├── analytics.py           # Sentiment trend, contacts, threads
 │   │   ├── ingest_email.py        # Email ingestion endpoint
+│   │   ├── gmail_api.py           # Gmail sync + status endpoints
 │   │   └── rag_api.py             # RAG debug search endpoint
 │   ├── database/
 │   │   ├── db.py                  # SQLAlchemy engine + session
 │   │   └── models.py              # All ORM models
 │   ├── rag/
-│   │   ├── create_kb.py           # KB seeding script
-│   │   └── retriever.py           # Vector search (cosine similarity)
+│   │   ├── create_kb.py           # KB seeding script (PostgreSQL + ChromaDB)
+│   │   └── retriever.py           # Vector search (ChromaDB)
 │   ├── services/
 │   │   ├── email_classifier.py    # LLM classification with full schema
 │   │   ├── heuristic_engine.py    # Fast pre-filter (spam/security/legal)
 │   │   ├── thread_service.py      # Thread history retrieval
 │   │   ├── ticket_service.py      # Ticket CRUD
 │   │   ├── action_service.py      # Action logging
+│   │   ├── gmail_service.py       # Gmail OAuth2 + email fetch/parse
 │   │   └── load_dataset.py        # Seed emails from JSON
 │   ├── schemas/
 │   │   └── email_schema.py        # Pydantic request schemas
 │   ├── create_tables.py           # DB table creation
 │   └── .env                       # Environment variables (not committed)
 ├── frontend/
-│   └── app.py                     # Streamlit dashboard (5 pages)
+│   └── app.py                     # Streamlit dashboard (legacy)
+├── frontend-react/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── MissionControl.jsx  # Inbox, metrics, tickets
+│   │   │   ├── ThreadWorkspace.jsx # Thread timeline + contact profile
+│   │   │   ├── Analytics.jsx       # Charts: category, sentiment, trend
+│   │   │   ├── RagDebug.jsx        # ChromaDB chunk search
+│   │   │   └── BulkOperations.jsx  # Process all / single email
+│   │   ├── App.jsx                 # Router + sidebar layout
+│   │   ├── App.css                 # Dark theme design system
+│   │   ├── api.js                  # Axios API client
+│   │   └── constants.js            # Badge colors, icons
+│   └── package.json
 ├── kb/
 │   ├── pricing_policy.md
 │   ├── sla_policy.md
@@ -100,6 +132,7 @@ crm-agent-platform/
 │   └── email-data-advanced.json   # 60 emails, 30 threads
 ├── requirements.txt
 ├── .gitignore
+├── chroma_db/                     # ChromaDB persistent vector store (auto-created)
 └── README.md
 ```
 
@@ -170,12 +203,15 @@ python rag/create_kb.py
 uvicorn api.main:app --reload --port 8000
 ```
 
-### 9. Start the frontend (new terminal)
+### 9. Start the React frontend (new terminal)
 
 ```bash
-cd crm-agent-platform
-streamlit run frontend/app.py
+cd frontend-react
+npm install
+npm run dev
 ```
+
+Opens at `uvicorn api.main:app --reload --port 8000`
 
 ---
 
@@ -184,6 +220,8 @@ streamlit run frontend/app.py
 | Variable | Description | Example |
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:pass@localhost:5432/crm_agent` |
+| `GMAIL_CREDENTIALS_FILE` | Path to OAuth credentials file | `credentials.json` |
+| `GMAIL_TOKEN_FILE` | Path to saved OAuth token | `token.json` |
 
 ---
 
@@ -208,6 +246,8 @@ streamlit run frontend/app.py
 | GET | `/threads/contact/{email}` | All threads for a contact |
 | GET | `/rag/search?q=...` | RAG debug — chunks + similarity scores |
 | GET | `/thread/{thread_id}` | Full thread history |
+| GET | `/gmail/status` | Check Gmail OAuth authentication status |
+| POST | `/gmail/sync` | Fetch unread Gmail emails and ingest into CRM |
 
 Full interactive docs available at: `http://localhost:8000/docs`
 
@@ -243,8 +283,8 @@ Thought → Action → Observation → Thought → ...
 
 1. KB documents (`kb/*.md`) are chunked into 300–500 token segments
 2. Each chunk is embedded using `sentence-transformers/all-MiniLM-L6-v2`
-3. Embeddings stored as JSON in PostgreSQL `knowledge_chunks` table
-4. On each email, top-3 relevant chunks retrieved via **cosine similarity**
+3. Embeddings stored in both PostgreSQL `knowledge_chunks` table (text/metadata) and ChromaDB (vectors)
+4. On each email, top-k chunks retrieved via **ChromaDB similarity search** — returns IDs matched back to PostgreSQL for full chunk data
 5. Retrieved chunks injected into LLM prompt as grounding context
 
 ### Re-seed KB after changes
@@ -301,17 +341,51 @@ python rag/create_kb.py
 - **Cost**: zero API cost during development and demo
 - **Trade-off**: slower inference than GPT-4, slightly lower quality on complex reasoning
 
-### Why cosine similarity in Python instead of pgvector?
-- **Simplicity**: no PostgreSQL extension required, works on any hosted DB
-- **Trade-off**: loads all embeddings into memory; for production at scale, pgvector or a dedicated vector DB (Pinecone, Weaviate) would be more efficient
+### Why ChromaDB instead of cosine similarity (numpy)?
+- **Performance**: ChromaDB handles vector indexing and search natively — no need to load all embeddings into memory on every query
+- **Persistence**: embeddings stored on disk in `chroma_db/`, survive restarts without re-seeding
+- **Dual storage**: PostgreSQL remains the source of truth for chunk text and metadata; ChromaDB handles only the vector search layer
+- **Trade-off**: adds a dependency and a second storage layer; for very large corpora a hosted vector DB (Pinecone, Weaviate) would scale further
 
 ### Why sentence-transformers instead of OpenAI embeddings?
 - **Local**: no API key, no latency, free
 - **Trade-off**: `all-MiniLM-L6-v2` (384 dimensions) is less semantically rich than `text-embedding-3-large` (3072 dimensions)
 
-### Why Streamlit instead of React?
-- **Speed**: full dashboard in a single Python file
-- **Trade-off**: less interactive than a React SPA; no real-time WebSocket support without extra libraries
+### Why React + Vite instead of Streamlit?
+- **Interactivity**: full SPA with client-side routing, no page reloads
+- **Design**: custom dark theme design system with badge chips, urgency-colored cards, animated buttons
+- **Charts**: Recharts for pie, bar, and line charts with custom tooltips
+- **Trade-off**: requires Node.js and a separate dev server; more setup than Streamlit
+
+---
+
+## Gmail API Integration
+
+### Setup
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a project → Enable **Gmail API**
+3. Create **OAuth 2.0 credentials** (Desktop app) → Download as `credentials.json`
+4. Place `credentials.json` in `backend/`
+5. On first `/gmail/sync` call, a browser window opens for OAuth consent — `token.json` is saved automatically for future runs
+
+### Auth Status Flow
+
+| State | UI Message |
+|---|---|
+| `credentials.json` missing | ⚠️ Place credentials.json in backend/ and restart |
+| `credentials.json` present, no `token.json` | ℹ️ Click Sync — browser OAuth popup will appear |
+| `token.json` present | ✅ Gmail authenticated |
+
+### How it works
+- Fetches unread emails from `INBOX` label via Gmail API
+- Deduplicates by `message-id` header — already-ingested emails are skipped
+- Auto-creates Contact and Thread records if they don't exist
+- Optionally marks fetched emails as read (`mark_read=true`)
+- Synced emails appear instantly in Mission Control and can be processed by the agent
+
+### UI
+The **Bulk Operations** page has a Gmail Sync panel with auth status indicator, configurable fetch limit, mark-as-read toggle, and ingested/skipped/fetched counts.
 
 ---
 
@@ -319,7 +393,8 @@ python rag/create_kb.py
 
 - Bulk processing 60 emails takes ~5–10 minutes (LLM inference is synchronous)
 - No WebSocket real-time updates — dashboard requires manual refresh
-- Cosine similarity search loads all KB chunks into memory on each query
+- ChromaDB vector index is local/file-based; for very large KB a hosted vector DB would be more scalable
+- Gmail sync requires manual OAuth on first run (browser popup); subsequent runs use saved `token.json`
 - No authentication on API endpoints (demo only)
 
 ---
@@ -331,3 +406,51 @@ python rag/create_kb.py
 3. RAG retrieval debug view — search "SLA credit calculation"
 4. Karen churn scenario — sentiment deterioration + escalation
 5. Analytics dashboard — category distribution, sentiment trend
+
+---
+
+## Docker Deployment
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
+
+### 1. Place Gmail credentials
+```
+backend/credentials.json   ← OAuth credentials from Google Cloud Console
+backend/token.json         ← generated on first Gmail sync (optional at start)
+```
+
+### 2. Build and start all services
+```bash
+docker compose up --build
+```
+
+This starts 5 containers in order:
+| Container | Role | Port |
+|---|---|---|
+| `crm_postgres` | PostgreSQL database | 5432 |
+| `crm_ollama` | Local LLM server | 11434 |
+| `crm_ollama_pull` | Pulls llama3 model (one-time) | — |
+| `crm_backend` | FastAPI backend | 8000 |
+| `crm_backend_init` | Creates tables + seeds data (one-time) | — |
+| `crm_frontend` | React app via nginx | 80 |
+
+### 3. Open the app
+- Dashboard → `http://localhost`
+- API docs → `http://localhost:8000/docs`
+
+### Useful commands
+```bash
+# Run in background
+docker compose up --build -d
+
+# View logs
+docker compose logs -f backend
+docker compose logs -f frontend
+
+# Stop all
+docker compose down
+
+# Stop and delete volumes (full reset)
+docker compose down -v
+```

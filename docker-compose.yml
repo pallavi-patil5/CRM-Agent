@@ -1,0 +1,126 @@
+version: "3.9"
+
+services:
+
+  # ─────────────────────────────────────────
+  # PostgreSQL
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: crm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crm_agent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d crm_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────
+  # Ollama (local LLM)
+  # ─────────────────────────────────────────
+  ollama:
+    image: ollama/ollama
+    container_name: crm_ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Pull llama3 model after ollama starts
+  ollama-pull:
+    image: ollama/ollama
+    container_name: crm_ollama_pull
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["ollama", "pull", "llama3"]
+    restart: "no"
+
+  # ─────────────────────────────────────────
+  # Backend (FastAPI)
+  # ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+    container_name: crm_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/crm_agent
+      OLLAMA_HOST: http://ollama:11434
+      GMAIL_CREDENTIALS_FILE: credentials.json
+      GMAIL_TOKEN_FILE: token.json
+    volumes:
+      - ./backend/credentials.json:/app/credentials.json:ro
+      - ./backend/token.json:/app/token.json
+      - ./kb:/app/../kb:ro
+      - ./data:/app/../data:ro
+      - chroma_data:/app/chroma_db
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # One-time DB init + KB seed
+  backend-init:
+    build:
+      context: ./backend
+    container_name: crm_backend_init
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/crm_agent
+    volumes:
+      - ./kb:/app/../kb:ro
+      - ./data:/app/../data:ro
+      - chroma_data:/app/chroma_db
+    entrypoint: >
+      sh -c "
+        python create_tables.py &&
+        python services/load_dataset.py &&
+        python rag/create_kb.py
+      "
+    restart: "no"
+
+  # ─────────────────────────────────────────
+  # Frontend (React + nginx)
+  # ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend-react
+    container_name: crm_frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  ollama_data:
+  chroma_data:

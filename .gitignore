@@ -32,6 +32,7 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # IDE
 .vscode/
@@ -39,9 +40,34 @@ Thumbs.db
 *.swp
 *.swo
 
-# Sentence Transformers cache
+# Sentence Transformers / HuggingFace cache
 .cache/
 models/
 
-# HuggingFace cache
-~/.cache/huggingface/
+# Gmail OAuth — never commit credentials or tokens
+backend/credentials.json
+backend/token.json
+credentials.json
+token.json
+
+# ChromaDB persistent vector store (auto-generated)
+chroma_db/
+
+# React / Node
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/.vite/
+
+# Streamlit cache (legacy)
+.streamlit/
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+
+token.json
+credentials.json
+
+postgres_data/
+chroma_data/

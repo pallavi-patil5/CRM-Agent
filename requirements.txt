@@ -12,3 +12,6 @@ plotly
 pandas
 requests
 pydantic
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
